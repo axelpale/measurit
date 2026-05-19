@@ -657,3 +657,53 @@ select {
     justify-content: flex-start;
   }
 }
+
+/* Suggestion Badges */
+.suggestions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.suggestion-badge {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: var(--transition-fast);
+  outline: none;
+}
+
+.suggestion-badge:hover {
+  background: rgba(124, 58, 237, 0.12);
+  border-color: rgba(124, 58, 237, 0.3);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.suggestion-badge:active {
+  transform: translateY(0);
+}
+
+.diff-badge {
+  font-size: 0.65rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: monospace;
+  transition: var(--transition-fast);
+}
+
+.suggestion-badge:hover .diff-badge {
+  background: rgba(124, 58, 237, 0.2);
+  color: #a78bfa;
+}

@@ -30,6 +30,8 @@ const distancesTableBody = document.getElementById('distancesTableBody');
 const tableEmptyState = document.getElementById('tableEmptyState');
 const recordBtn = document.getElementById('recordBtn');
 const clearAllBtn = document.getElementById('clearAllBtn');
+const distanceSuggestionsContainer = document.getElementById('distanceSuggestionsContainer');
+const distanceSuggestionsList = document.getElementById('distanceSuggestionsList');
 
 // 3D Canvas Elements
 const mapCanvas = document.getElementById('mapCanvas');
@@ -58,6 +60,7 @@ async function fetchData() {
     renderDistanceFormDropdowns();
     renderDistanceLogsTable();
     updateCanvasDisplay();
+    updateDistanceSuggestions();
   } catch (err) {
     console.error('Error fetching system state:', err);
   }
@@ -70,7 +73,10 @@ function renderPointsUI() {
   pointsCount.textContent = `${points.length} point${points.length === 1 ? '' : 's'}`;
   pointsList.innerHTML = '';
   
-  points.forEach((pt, index) => {
+  // Render points with the most recent first
+  const reversedPoints = [...points].reverse();
+  reversedPoints.forEach((pt) => {
+    const index = points.indexOf(pt);
     const li = document.createElement('li');
     li.className = 'point-item';
     li.dataset.id = pt.id;
@@ -212,6 +218,65 @@ function renderDistanceFormDropdowns() {
   // Restore selection if they still exist
   if (points.some(p => p.id === currentSel1)) firstPointSelect.value = currentSel1;
   if (points.some(p => p.id === currentSel2)) secondPointSelect.value = currentSel2;
+}
+
+/**
+ * Update the UI showing suggestions for missing point pairs
+ * Sorted by ID number difference in ascending order
+ */
+function updateDistanceSuggestions() {
+  if (points.length < 2) {
+    distanceSuggestionsContainer.classList.add('hidden');
+    return;
+  }
+  
+  const missingPairs = [];
+  
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const p1 = points[i];
+      const p2 = points[j];
+      
+      // Check if connection already exists in either direction
+      const exists = distances.some(d => 
+        (d.point1Id === p1.id && d.point2Id === p2.id) ||
+        (d.point1Id === p2.id && d.point2Id === p1.id)
+      );
+      
+      if (!exists) {
+        const id1 = Number(p1.id);
+        const id2 = Number(p2.id);
+        const diff = Math.abs(id1 - id2);
+        missingPairs.push({ p1, p2, diff });
+      }
+    }
+  }
+  
+  if (missingPairs.length === 0) {
+    distanceSuggestionsContainer.classList.add('hidden');
+    return;
+  }
+  
+  // Sort missing pairs by ID difference (ascending)
+  missingPairs.sort((a, b) => a.diff - b.diff);
+  
+  distanceSuggestionsContainer.classList.remove('hidden');
+  distanceSuggestionsList.innerHTML = '';
+  
+  // Take up to 4 most suitable suggestions
+  const topSuggestions = missingPairs.slice(0, 4);
+  topSuggestions.forEach(s => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'suggestion-badge';
+    btn.innerHTML = `${escapeHTML(s.p1.label)} &harr; ${escapeHTML(s.p2.label)}`;
+    btn.addEventListener('click', () => {
+      firstPointSelect.value = s.p1.id;
+      secondPointSelect.value = s.p2.id;
+      distanceInput.focus();
+    });
+    distanceSuggestionsList.appendChild(btn);
+  });
 }
 
 /**
