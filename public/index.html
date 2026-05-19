@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>measureit &mdash; Premium Text Analytics</title>
+  <title>measureit &mdash; 3D Land Property Mapper</title>
   <!-- Google Fonts - Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,107 +19,146 @@
         <span class="logo-icon">📏</span>
         <span class="logo-text">measure<span>it</span></span>
       </div>
-      <p class="tagline">Elegant, instantaneous text analysis dashboard</p>
+      <p class="tagline">3D Land Property Mapping & Distance Geometry Solver</p>
     </header>
 
     <main class="app-main">
-      <section class="editor-section">
+      <!-- Left Control Panel -->
+      <section class="control-panel">
+        
+        <!-- Point Manager Card -->
+        <div class="card glass-card margin-bottom">
+          <div class="card-header">
+            <h2>1. Landmark Points</h2>
+            <div class="badge" id="pointsCount">0 points</div>
+          </div>
+          
+          <!-- Add Point Form -->
+          <form id="addPointForm" class="input-group">
+            <input type="text" id="newPointLabel" placeholder="e.g. Oak Tree, Fence Corner..." required autocomplete="off">
+            <button type="submit" class="btn btn-primary btn-sm">Add</button>
+          </form>
+
+          <!-- Points Scrollable List -->
+          <div class="points-list-container">
+            <ul id="pointsList" class="points-list">
+              <!-- Dynamically populated via JS -->
+            </ul>
+          </div>
+        </div>
+
+        <!-- Distance Recording Card -->
         <div class="card glass-card">
           <div class="card-header">
-            <h2>Enter your text</h2>
-            <div class="char-countdown" id="charCountdown">0 characters</div>
+            <h2>2. Record Measured Distance</h2>
           </div>
-          <div class="input-wrapper">
-            <textarea id="textInput" placeholder="Paste or type your text here to analyze..." autofocus></textarea>
-          </div>
-          <div class="card-actions">
-            <button id="clearBtn" class="btn btn-secondary">Clear</button>
-            <button id="measureBtn" class="btn btn-primary">
-              <span>Measure</span>
-              <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-            </button>
-          </div>
+          
+          <form id="recordDistanceForm" class="distance-form">
+            <div class="form-row">
+              <div class="form-col">
+                <label for="firstPointSelect">First Point</label>
+                <select id="firstPointSelect" required>
+                  <option value="" disabled selected>Select Point...</option>
+                </select>
+              </div>
+              <div class="form-col">
+                <label for="secondPointSelect">Second Point</label>
+                <select id="secondPointSelect" required>
+                  <option value="" disabled selected>Select Point...</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-col margin-top-sm">
+              <label for="distanceInput">Measured Distance (cm)</label>
+              <div class="numeric-input-wrapper">
+                <input type="number" id="distanceInput" placeholder="e.g. 300" min="0.1" step="any" required>
+                <span class="input-suffix">cm</span>
+              </div>
+            </div>
+            
+            <div class="card-actions">
+              <button type="submit" id="recordBtn" class="btn btn-primary full-width">
+                <span>Record Distance</span>
+                <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+            </div>
+          </form>
         </div>
       </section>
 
-      <section class="results-section">
-        <div class="results-grid">
-          <!-- Words Card -->
-          <div class="card metric-card">
-            <div class="metric-icon purple">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-            </div>
-            <div class="metric-content">
-              <h3>Words</h3>
-              <p class="metric-value" id="valWords">0</p>
-            </div>
+      <!-- Right Output Panel -->
+      <section class="display-panel">
+        
+        <!-- Interactive 3D Canvas Map Card -->
+        <div class="card glass-card canvas-card margin-bottom">
+          <div class="card-header border-none">
+            <h2>3D Property Map</h2>
+            <div class="badge" id="solveBadge">Awaiting Solver...</div>
           </div>
-
-          <!-- Characters Card -->
-          <div class="card metric-card">
-            <div class="metric-icon blue">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-            </div>
-            <div class="metric-content">
-              <h3>Characters</h3>
-              <p class="metric-value" id="valCharacters">0</p>
-              <span class="metric-sub" id="valCharNoSpaces">0 without spaces</span>
-            </div>
-          </div>
-
-          <!-- Sentences Card -->
-          <div class="card metric-card">
-            <div class="metric-icon green">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-            </div>
-            <div class="metric-content">
-              <h3>Sentences</h3>
-              <p class="metric-value" id="valSentences">0</p>
-            </div>
-          </div>
-
-          <!-- Avg Word Length Card -->
-          <div class="card metric-card">
-            <div class="metric-icon orange">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>
-            </div>
-            <div class="metric-content">
-              <h3>Avg. Word Length</h3>
-              <p class="metric-value" id="valAvgWordLength">0.0</p>
-              <span class="metric-sub">characters</span>
-            </div>
-          </div>
-
-          <!-- Reading Time Card -->
-          <div class="card metric-card">
-            <div class="metric-icon teal">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-            </div>
-            <div class="metric-content">
-              <h3>Reading Time</h3>
-              <p class="metric-value" id="valReadingTime">&lt; 10 sec</p>
-            </div>
-          </div>
-
-          <!-- Readability Card -->
-          <div class="card metric-card span-two-cols">
-            <div class="metric-icon gold">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            </div>
-            <div class="metric-content">
-              <h3>Readability Index</h3>
-              <div class="readability-info">
-                <span class="metric-value" id="valReadabilityScore">0.0</span>
-                <div class="readability-badge" id="valReadabilityLevel">Ready to measure</div>
+          
+          <div class="canvas-viewport">
+            <!-- 3D projection rendering target -->
+            <canvas id="mapCanvas"></canvas>
+            
+            <!-- Incomplete Data Overlay Placeholder -->
+            <div id="canvasPlaceholder" class="canvas-overlay">
+              <div class="placeholder-content">
+                <div class="placeholder-icon">📐</div>
+                <h3>Awaiting Network Data</h3>
+                <p>To compute the 3D map, please establish a network linking at least <strong>4 points</strong> with <strong>4 distances</strong>.</p>
+                <div class="placeholder-hints" id="placeholderStatus">
+                  Active Points: 0/4 • Logged Distances: 0/4
+                </div>
               </div>
+            </div>
+
+            <!-- Orbit controls tooltip -->
+            <div id="canvasControls" class="canvas-controls-info hidden">
+              🖱️ Drag to Orbit • 🎡 Scroll to Zoom
             </div>
           </div>
         </div>
+
+        <!-- Recorded Distance Logs Card -->
+        <div class="card glass-card">
+          <div class="card-header">
+            <h2>4. Recorded Distance Log</h2>
+            <div class="badge" id="distancesCount">0 records</div>
+          </div>
+          
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Point A</th>
+                  <th>Point B</th>
+                  <th class="text-right">Distance</th>
+                  <th class="text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="distancesTableBody">
+                <!-- Dynamically populated via JS -->
+              </tbody>
+            </table>
+            
+            <!-- Empty table state -->
+            <div id="tableEmptyState" class="table-empty">
+              No distance connections logged yet.
+            </div>
+          </div>
+
+          <div class="card-actions justify-between margin-top-md">
+            <button id="clearAllBtn" class="btn btn-secondary">Reset System</button>
+            <div class="math-note">Solver updates instantly</div>
+          </div>
+        </div>
+
       </section>
     </main>
 
     <footer class="app-footer">
-      <p>&copy; 2026 measureit. Crafted with ultra-light premium design guidelines.</p>
+      <p>&copy; 2026 measureit Land Mapper. Uses relative Stress Geometry algorithms to solve 3D systems from pairwise measurements.</p>
     </footer>
   </div>
 
