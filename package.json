@@ -1,0 +1,16 @@
+{
+  "name": "measureit",
+  "version": "1.0.0",
+  "description": "A elegant and minimalist text measurement application with Node.js and Express.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
