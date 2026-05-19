@@ -21,6 +21,12 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# SQLite database files
+measureit.db
+*.db
+*.sqlite
+*.sqlite3
+
 # IDEs and Editors
 .idea/
 .vscode/
