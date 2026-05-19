@@ -22,7 +22,7 @@ pnpm-debug.log*
 Thumbs.db
 
 # SQLite database files
-measureit.db
+measurit.db
 *.db
 *.sqlite
 *.sqlite3

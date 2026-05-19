@@ -9,10 +9,10 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // SQLite Connection (local file-based persistence)
-const dbPath = path.join(__dirname, 'measureit.db');
+const dbPath = path.join(__dirname, 'measurit.db');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Failed to open database measureit.db:', err);
+    console.error('Failed to open database measurit.db:', err);
   } else {
     console.log('Connected to SQLite database at:', dbPath);
   }
@@ -78,7 +78,7 @@ function initializeDatabase() {
         if (err) return reject(err);
         
         if (row.count === 0) {
-          console.log("Database measureit.db is fresh. Seeding default regular tetrahedron pyramid...");
+          console.log("Database measurit.db is fresh. Seeding default regular tetrahedron pyramid...");
           
           db.run("INSERT INTO points (id, label) VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D')", (err) => {
             if (err) return reject(err);
@@ -481,5 +481,5 @@ app.post('/api/clear', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Measureit 3D Land Mapper (SQLite) running at http://localhost:${PORT}`);
+  console.log(`Measurit 3D Land Mapper (SQLite) running at http://localhost:${PORT}`);
 });

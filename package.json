@@ -1,5 +1,5 @@
 {
-  "name": "measureit",
+  "name": "measurit",
   "version": "1.0.0",
   "description": "A elegant and minimalist text measurement application with Node.js and Express.",
   "main": "server.js",

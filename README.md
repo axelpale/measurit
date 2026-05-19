@@ -1,4 +1,4 @@
-# measureit 📏
+# measurit 📏
 
 [Insert introduction here]
 
