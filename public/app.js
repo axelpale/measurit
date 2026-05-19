@@ -38,6 +38,7 @@ const canvasPlaceholder = document.getElementById('canvasPlaceholder');
 const canvasControls = document.getElementById('canvasControls');
 const placeholderStatus = document.getElementById('placeholderStatus');
 const solveBadge = document.getElementById('solveBadge');
+const downloadSvgBtn = document.getElementById('downloadSvgBtn');
 
 /**
  * Fetch latest state from Node server and update views
@@ -353,6 +354,7 @@ function updateCanvasDisplay() {
     // Unlock the Canvas Orbit rendering
     canvasPlaceholder.classList.add('hidden');
     canvasControls.classList.remove('hidden');
+    downloadSvgBtn.classList.remove('hidden');
     
     solveBadge.className = 'badge solved';
     solveBadge.textContent = '3D Reconstructed';
@@ -363,6 +365,7 @@ function updateCanvasDisplay() {
     // Lock viewport and show overlay placeholder
     canvasPlaceholder.classList.remove('hidden');
     canvasControls.classList.add('hidden');
+    downloadSvgBtn.classList.add('hidden');
     
     solveBadge.className = 'badge unsolved';
     solveBadge.textContent = 'Awaiting Data';
@@ -634,6 +637,276 @@ mapCanvas.addEventListener('wheel', (e) => {
 window.addEventListener('resize', () => {
   if (solveSuccess) requestAnimationFrame(draw3DScene);
 });
+
+// ==========================================================================
+// 2D Optimal PCA Projection & Minimal B&W SVG Export
+// ==========================================================================
+
+/**
+ * Perform 3D to 2D PCA projection and generate an ultra-minimal black-and-white SVG
+ */
+function generateMinimalSVGString() {
+  // 1. Filter and center coordinates
+  const coordsList = points.map(p => {
+    const coord = coordinates[p.id];
+    return {
+      id: p.id,
+      label: p.label,
+      x: coord ? coord.x : 0,
+      y: coord ? coord.y : 0,
+      z: coord ? coord.z : 0
+    };
+  }).filter(p => coordinates[p.id] !== undefined);
+
+  if (coordsList.length < 4) return null;
+
+  // 2. Center coordinates around 3D centroid
+  const n = coordsList.length;
+  let meanX = 0, meanY = 0, meanZ = 0;
+  for (const p of coordsList) {
+    meanX += p.x;
+    meanY += p.y;
+    meanZ += p.z;
+  }
+  meanX /= n;
+  meanY /= n;
+  meanZ /= n;
+
+  const centered = coordsList.map(p => ({
+    id: p.id,
+    label: p.label,
+    x: p.x - meanX,
+    y: p.y - meanY,
+    z: p.z - meanZ
+  }));
+
+  // 3. Compute 3x3 Covariance Matrix
+  let Cxx = 0, Cxy = 0, Cxz = 0;
+  let Cyy = 0, Cyz = 0, Czz = 0;
+  for (const p of centered) {
+    Cxx += p.x * p.x;
+    Cxy += p.x * p.y;
+    Cxz += p.x * p.z;
+    Cyy += p.y * p.y;
+    Cyz += p.y * p.z;
+    Czz += p.z * p.z;
+  }
+  Cxx /= n;
+  Cxy /= n;
+  Cxz /= n;
+  Cyy /= n;
+  Cyz /= n;
+  Czz /= n;
+
+  const Cov = [
+    [Cxx, Cxy, Cxz],
+    [Cxy, Cyy, Cyz],
+    [Cxz, Cyz, Czz]
+  ];
+
+  // 4. Power Iteration with Orthogonalization to solve for PC1 and PC2
+  function getEigenvector(A, excludeV = null) {
+    const seeds = [
+      [1.0, 2.0, 3.0],
+      [-1.0, 1.0, -1.0],
+      [0.1, -0.9, 0.4]
+    ];
+    let bestV = [1.0, 0.0, 0.0];
+    let bestVal = -1.0;
+    
+    for (const seed of seeds) {
+      let v = [...seed];
+      if (excludeV) {
+        // Project seed to be orthogonal to excludeV
+        const dot = v[0] * excludeV[0] + v[1] * excludeV[1] + v[2] * excludeV[2];
+        v = [
+          v[0] - dot * excludeV[0],
+          v[1] - dot * excludeV[1],
+          v[2] - dot * excludeV[2]
+        ];
+      }
+      const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+      if (len < 1e-6) continue;
+      v = [v[0] / len, v[1] / len, v[2] / len];
+      
+      for (let iter = 0; iter < 100; iter++) {
+        let w = [
+          A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
+          A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
+          A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2]
+        ];
+        if (excludeV) {
+          // Maintain strict numerical orthogonality
+          const dot = w[0] * excludeV[0] + w[1] * excludeV[1] + w[2] * excludeV[2];
+          w = [
+            w[0] - dot * excludeV[0],
+            w[1] - dot * excludeV[1],
+            w[2] - dot * excludeV[2]
+          ];
+        }
+        const wLen = Math.sqrt(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
+        if (wLen < 1e-12) break;
+        const nextV = [w[0] / wLen, w[1] / wLen, w[2] / wLen];
+        const dotV = v[0] * nextV[0] + v[1] * nextV[1] + v[2] * nextV[2];
+        if (Math.abs(dotV) > 0.9999999) {
+          v = nextV;
+          break;
+        }
+        v = nextV;
+      }
+      
+      const Av = [
+        A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
+        A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
+        A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2]
+      ];
+      const eigenvalue = v[0] * Av[0] + v[1] * Av[1] + v[2] * Av[2];
+      if (eigenvalue > bestVal) {
+        bestVal = eigenvalue;
+        bestV = v;
+      }
+    }
+    return bestV;
+  }
+
+  const v1 = getEigenvector(Cov);
+  const v2 = getEigenvector(Cov, v1);
+
+  // 5. Project centered coordinates onto 2D plane
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+
+  const projectedPoints = centered.map(p => {
+    const px = p.x * v1[0] + p.y * v1[1] + p.z * v1[2];
+    const py = p.x * v2[0] + p.y * v2[1] + p.z * v2[2];
+    
+    if (px < minX) minX = px;
+    if (px > maxX) maxX = px;
+    if (py < minY) minY = py;
+    if (py > maxY) maxY = py;
+    
+    return { id: p.id, label: p.label, px, py };
+  });
+
+  const svgW = 600;
+  const svgH = 600;
+  const padding = 80;
+
+  const dx = maxX - minX;
+  const dy = maxY - minY;
+
+  const scaleX = dx > 1e-6 ? (svgW - padding * 2) / dx : 1;
+  const scaleY = dy > 1e-6 ? (svgH - padding * 2) / dy : 1;
+  const finalScale = Math.min(scaleX, scaleY);
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+
+  projectedPoints.forEach(p => {
+    p.svgX = svgW / 2 + (p.px - cx) * finalScale;
+    p.svgY = svgH / 2 - (p.py - cy) * finalScale; // Invert Cartesian Y for SVG screens
+  });
+
+  const projMap = {};
+  projectedPoints.forEach(p => {
+    projMap[p.id] = p;
+  });
+
+  // 6. Build the ultra-minimalist B&W SVG
+  let svg = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgW} ${svgH}" width="100%" height="100%">
+  <!-- Transparent background -->
+  <rect width="${svgW}" height="${svgH}" fill="none"/>
+
+  <!-- Distance Connections (Thin black lines) -->
+  <g id="connections">`;
+
+  distances.forEach(d => {
+    const p1 = projMap[d.point1Id];
+    const p2 = projMap[d.point2Id];
+    if (!p1 || !p2) return;
+
+    svg += `
+    <line x1="${p1.svgX.toFixed(2)}" y1="${p1.svgY.toFixed(2)}" x2="${p2.svgX.toFixed(2)}" y2="${p2.svgY.toFixed(2)}" stroke="#000000" stroke-width="1.5" stroke-linecap="round"/>`;
+  });
+
+  svg += `
+  </g>
+
+  <!-- Distance Value Text Labels (Clean, minimal masks) -->
+  <g id="distance-labels">`;
+
+  distances.forEach(d => {
+    const p1 = projMap[d.point1Id];
+    const p2 = projMap[d.point2Id];
+    if (!p1 || !p2) return;
+
+    const midX = (p1.svgX + p2.svgX) / 2;
+    const midY = (p1.svgY + p2.svgY) / 2;
+    const distText = `${d.distance.toLocaleString()} cm`;
+    const labelW = distText.length * 5.5 + 4;
+    const labelH = 10;
+
+    svg += `
+    <!-- Mask and label for connection between ${escapeHTML(p1.label)} and ${escapeHTML(p2.label)} -->
+    <rect x="${(midX - labelW/2).toFixed(2)}" y="${(midY - 5).toFixed(2)}" width="${labelW.toFixed(2)}" height="${labelH}" fill="#ffffff"/>
+    <text x="${midX.toFixed(2)}" y="${(midY + 3).toFixed(2)}" font-family="system-ui, -apple-system, sans-serif" font-size="8.5" fill="#000000" text-anchor="middle">${distText}</text>`;
+  });
+
+  svg += `
+  </g>
+
+  <!-- Point Landmark Dots (Simple solid black dots) -->
+  <g id="points">`;
+
+  projectedPoints.forEach(pt => {
+    svg += `
+    <circle cx="${pt.svgX.toFixed(2)}" cy="${pt.svgY.toFixed(2)}" r="6" fill="#000000"/>`;
+  });
+
+  svg += `
+  </g>
+
+  <!-- Point Landmark Labels (Simple black text centered slightly above) -->
+  <g id="point-labels">`;
+
+  projectedPoints.forEach(pt => {
+    svg += `
+    <text x="${pt.svgX.toFixed(2)}" y="${(pt.svgY - 12).toFixed(2)}" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="bold" fill="#000000" text-anchor="middle">${escapeHTML(pt.label)}</text>`;
+  });
+
+  svg += `
+  </g>
+</svg>
+`;
+
+  return svg;
+}
+
+/**
+ * Trigger download of the minimal B&W SVG projection
+ */
+function downloadSVG() {
+  const svgContent = generateMinimalSVGString();
+  if (!svgContent) {
+    alert("Cannot generate 2D projection. Please make sure the 3D model is reconstructed.");
+    return;
+  }
+  
+  const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `measurit-projection-${new Date().toISOString().slice(0, 10)}.svg`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Bind download button click event
+downloadSvgBtn.addEventListener('click', downloadSVG);
 
 // ==========================================================================
 // Initial Boot Trigger
