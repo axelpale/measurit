@@ -707,3 +707,63 @@ select {
   background: rgba(124, 58, 237, 0.2);
   color: #a78bfa;
 }
+
+/* ==========================================================================
+   Edge Stress Diagnostics Styling
+   ========================================================================== */
+
+.stress-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.stress-badge.clean {
+  background: rgba(5, 150, 105, 0.1);
+  color: #34d399;
+  border: 1px solid rgba(5, 150, 105, 0.25);
+}
+
+.stress-badge.warning {
+  background: rgba(220, 38, 38, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.25);
+  animation: stress-pulse 2s infinite ease-in-out;
+}
+
+.stressed-row {
+  background: rgba(220, 38, 38, 0.04) !important;
+}
+
+.stressed-row td {
+  border-bottom: 1px solid rgba(220, 38, 38, 0.18) !important;
+}
+
+@keyframes stress-pulse {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(220, 38, 38, 0.2);
+    border-color: rgba(220, 38, 38, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.5);
+    border-color: rgba(220, 38, 38, 0.6);
+  }
+}
+
+.suggestion-badge.remeasure {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  color: #f87171;
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.15);
+}
+
+.suggestion-badge.remeasure:hover {
+  background: rgba(220, 38, 38, 0.18);
+  border-color: rgba(220, 38, 38, 0.6);
+  color: #f87171;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+}

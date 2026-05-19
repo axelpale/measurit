@@ -409,19 +409,25 @@ app.post('/api/distances', async (req, res) => {
 
     // Check if measurement already exists
     const exists = await dbAll("SELECT id FROM distances WHERE point1Id = ? AND point2Id = ?", [uP1, uP2]);
-    if (exists.length > 0) {
-      return res.status(400).json({ error: 'A distance measurement already exists between these points' });
-    }
+    let recordId;
+    let isUpdate = false;
 
-    const result = await dbRun("INSERT INTO distances (point1Id, point2Id, distance) VALUES (?, ?, ?)", [uP1, uP2, distVal]);
+    if (exists.length > 0) {
+      recordId = exists[0].id;
+      await dbRun("UPDATE distances SET distance = ? WHERE id = ?", [distVal, recordId]);
+      isUpdate = true;
+    } else {
+      const result = await dbRun("INSERT INTO distances (point1Id, point2Id, distance) VALUES (?, ?, ?)", [uP1, uP2, distVal]);
+      recordId = result.lastID;
+    }
 
     // Re-solve 3D geometry coordinates
     await run3DCoordinateSolver();
 
-    res.status(201).json({
-      message: 'Distance recorded successfully',
+    res.status(isUpdate ? 200 : 201).json({
+      message: isUpdate ? 'Distance measurement updated successfully' : 'Distance recorded successfully',
       distance: {
-        id: String(result.lastID),
+        id: String(recordId),
         point1Id: String(uP1),
         point2Id: String(uP2),
         distance: distVal

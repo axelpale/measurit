@@ -45,7 +45,7 @@ const downloadSvgBtn = document.getElementById('downloadSvgBtn');
 /**
  * Fetch latest state from Node server and update views
  */
-async function fetchData() {
+async function fetchData(selectFirstSuggestion = false, alignCameraToPCAFlag = false) {
   try {
     const response = await fetch('/api/data');
     if (!response.ok) throw new Error('Failed to fetch data');
@@ -56,11 +56,15 @@ async function fetchData() {
     coordinates = data.coordinates;
     solveSuccess = data.solveSuccess;
     
+    if (alignCameraToPCAFlag && solveSuccess) {
+      alignCameraToPCA();
+    }
+    
     renderPointsUI();
     renderDistanceFormDropdowns();
     renderDistanceLogsTable();
     updateCanvasDisplay();
-    updateDistanceSuggestions();
+    updateDistanceSuggestions(selectFirstSuggestion);
   } catch (err) {
     console.error('Error fetching system state:', err);
   }
@@ -224,19 +228,43 @@ function renderDistanceFormDropdowns() {
  * Update the UI showing suggestions for missing point pairs
  * Sorted by ID number difference in ascending order
  */
-function updateDistanceSuggestions() {
+function updateDistanceSuggestions(selectFirst = false) {
   if (points.length < 2) {
     distanceSuggestionsContainer.classList.add('hidden');
     return;
   }
   
-  const missingPairs = [];
-  
+  const suggestions = [];
+  const seenPairs = new Set();
+  const getPairKey = (id1, id2) => {
+    return Number(id1) < Number(id2) ? `${id1}-${id2}` : `${id2}-${id1}`;
+  };
+
+  // 1. Add top-3 high stress connections for remeasuring
+  const topStressedIds = getTopStressedDistanceIds();
+  distances.forEach(d => {
+    if (topStressedIds.has(d.id)) {
+      const p1 = points.find(p => p.id === d.point1Id);
+      const p2 = points.find(p => p.id === d.point2Id);
+      if (p1 && p2) {
+        const key = getPairKey(p1.id, p2.id);
+        if (!seenPairs.has(key)) {
+          seenPairs.add(key);
+          suggestions.push({ p1, p2, isRemeasure: true, diff: 0 });
+        }
+      }
+    }
+  });
+
+  // 2. Add missing point pairs
   for (let i = 0; i < points.length; i++) {
     for (let j = i + 1; j < points.length; j++) {
       const p1 = points[i];
       const p2 = points[j];
       
+      const key = getPairKey(p1.id, p2.id);
+      if (seenPairs.has(key)) continue;
+
       // Check if connection already exists in either direction
       const exists = distances.some(d => 
         (d.point1Id === p1.id && d.point2Id === p2.id) ||
@@ -244,32 +272,43 @@ function updateDistanceSuggestions() {
       );
       
       if (!exists) {
+        seenPairs.add(key);
         const id1 = Number(p1.id);
         const id2 = Number(p2.id);
         const diff = Math.abs(id1 - id2);
-        missingPairs.push({ p1, p2, diff });
+        suggestions.push({ p1, p2, isRemeasure: false, diff });
       }
     }
   }
   
-  if (missingPairs.length === 0) {
+  if (suggestions.length === 0) {
     distanceSuggestionsContainer.classList.add('hidden');
     return;
   }
   
-  // Sort missing pairs by ID difference (ascending)
-  missingPairs.sort((a, b) => a.diff - b.diff);
+  // Sort suggestions: Remeasures first, then missing pairs sorted by ID difference
+  suggestions.sort((a, b) => {
+    if (a.isRemeasure && !b.isRemeasure) return -1;
+    if (!a.isRemeasure && b.isRemeasure) return 1;
+    if (a.isRemeasure && b.isRemeasure) return 0;
+    return a.diff - b.diff;
+  });
   
   distanceSuggestionsContainer.classList.remove('hidden');
   distanceSuggestionsList.innerHTML = '';
   
   // Take up to 4 most suitable suggestions
-  const topSuggestions = missingPairs.slice(0, 4);
+  const topSuggestions = suggestions.slice(0, 4);
   topSuggestions.forEach(s => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'suggestion-badge';
-    btn.innerHTML = `${escapeHTML(s.p1.label)} &harr; ${escapeHTML(s.p2.label)}`;
+    if (s.isRemeasure) {
+      btn.className = 'suggestion-badge remeasure';
+      btn.innerHTML = `${escapeHTML(s.p1.label)} &harr; ${escapeHTML(s.p2.label)} <span class="diff-badge" style="color: #f87171; background: rgba(220, 38, 38, 0.15);">Remeasure</span>`;
+    } else {
+      btn.className = 'suggestion-badge';
+      btn.innerHTML = `${escapeHTML(s.p1.label)} &harr; ${escapeHTML(s.p2.label)}`;
+    }
     btn.addEventListener('click', () => {
       firstPointSelect.value = s.p1.id;
       secondPointSelect.value = s.p2.id;
@@ -277,6 +316,44 @@ function updateDistanceSuggestions() {
     });
     distanceSuggestionsList.appendChild(btn);
   });
+
+  // Automatically select the first suggestion if requested
+  if (selectFirst && topSuggestions.length > 0) {
+    const s = topSuggestions[0];
+    firstPointSelect.value = s.p1.id;
+    secondPointSelect.value = s.p2.id;
+    distanceInput.focus();
+  }
+}
+
+/**
+ * Helper: Find the IDs of the top 3 distance records with the highest stress (> 1.0 cm)
+ */
+function getTopStressedDistanceIds() {
+  const stressedList = [];
+  if (solveSuccess) {
+    distances.forEach(d => {
+      const pt1 = coordinates[d.point1Id];
+      const pt2 = coordinates[d.point2Id];
+      if (pt1 && pt2) {
+        const dx = pt1.x - pt2.x;
+        const dy = pt1.y - pt2.y;
+        const dz = pt1.z - pt2.z;
+        const reconstructedDistance = Math.sqrt(dx*dx + dy*dy + dz*dz) * 100;
+        const stressVal = Math.abs(reconstructedDistance - d.distance);
+        if (stressVal > 1.0) {
+          stressedList.push({ id: d.id, stressVal });
+        }
+      }
+    });
+  }
+  
+  // Sort descending by stressVal
+  stressedList.sort((a, b) => b.stressVal - a.stressVal);
+  
+  // Take top 3
+  const topIds = new Set(stressedList.slice(0, 3).map(item => item.id));
+  return topIds;
 }
 
 /**
@@ -293,6 +370,8 @@ function renderDistanceLogsTable() {
   
   tableEmptyState.classList.add('hidden');
 
+  const topStressedIds = getTopStressedDistanceIds();
+
   distances.forEach(d => {
     const p1 = points.find(p => p.id === d.point1Id);
     const p2 = points.find(p => p.id === d.point2Id);
@@ -300,11 +379,43 @@ function renderDistanceLogsTable() {
     const label1 = p1 ? p1.label : `[Unknown #${d.point1Id}]`;
     const label2 = p2 ? p2.label : `[Unknown #${d.point2Id}]`;
     
+    // Calculate stress if solved
+    let stressBadgeHTML = '<span style="color: var(--text-muted); font-size: 0.8rem;">-</span>';
+    let isStressed = false;
+    
+    if (solveSuccess) {
+      const pt1 = coordinates[d.point1Id];
+      const pt2 = coordinates[d.point2Id];
+      if (pt1 && pt2) {
+        const dx = pt1.x - pt2.x;
+        const dy = pt1.y - pt2.y;
+        const dz = pt1.z - pt2.z;
+        const reconstructedDistance = Math.sqrt(dx*dx + dy*dy + dz*dz) * 100;
+        const difference = reconstructedDistance - d.distance;
+        
+        isStressed = topStressedIds.has(d.id);
+        
+        const diffSign = difference > 0 ? '+' : '';
+        const diffText = `${diffSign}${difference.toFixed(1)} cm`;
+        
+        if (isStressed) {
+          stressBadgeHTML = `<span class="stress-badge warning">${diffText}</span>`;
+        } else {
+          stressBadgeHTML = `<span class="stress-badge clean">${diffText}</span>`;
+        }
+      }
+    }
+    
     const tr = document.createElement('tr');
+    if (isStressed) {
+      tr.className = 'stressed-row';
+    }
+    
     tr.innerHTML = `
       <td style="font-weight: 500;">${escapeHTML(label1)}</td>
       <td style="font-weight: 500;">${escapeHTML(label2)}</td>
-      <td class="text-right">${d.distance.toLocaleString()} cm</td>
+      <td class="text-right" style="font-weight: 500; ${isStressed ? 'color: #f87171;' : ''}">${d.distance.toLocaleString()} cm</td>
+      <td class="text-right" style="padding-right: 16px;">${stressBadgeHTML}</td>
       <td class="text-center">
         <button class="btn-danger-icon delete-distance-btn" title="Delete distance measurement">
           <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -360,7 +471,7 @@ addPointForm.addEventListener('submit', async (e) => {
     if (!response.ok) throw new Error(data.error || 'Failed to add point');
 
     newPointLabel.value = '';
-    fetchData();
+    fetchData(false, true);
   } catch (err) {
     alert(err.message);
   }
@@ -388,7 +499,7 @@ recordDistanceForm.addEventListener('submit', async (e) => {
     if (!response.ok) throw new Error(data.error || 'Failed to record distance');
 
     distanceInput.value = '';
-    fetchData();
+    fetchData(true);
   } catch (err) {
     alert(err.message);
   }
@@ -445,6 +556,7 @@ function updateCanvasDisplay() {
  * Core Canvas 3D Rendering Projection loop
  */
 function draw3DScene() {
+  const topStressedIds = getTopStressedDistanceIds();
   // Sync HTML bounds
   const rect = mapCanvas.getBoundingClientRect();
   const width = rect.width;
@@ -526,11 +638,27 @@ function draw3DScene() {
     const pt2 = projected[d.point2Id];
     if (!pt1 || !pt2) return;
 
-    // Glowing style
-    ctx.shadowBlur = 6;
-    ctx.shadowColor = 'rgba(124, 58, 237, 0.5)';
-    ctx.strokeStyle = 'rgba(124, 58, 237, 0.65)';
-    ctx.lineWidth = 2.5;
+    // Calculate stress to identify potential measurement error
+    let isStressed = false;
+    let stressVal = 0;
+    let difference = 0;
+    const c1 = coordinates[d.point1Id];
+    const c2 = coordinates[d.point2Id];
+    if (c1 && c2) {
+      const dx = c1.x - c2.x;
+      const dy = c1.y - c2.y;
+      const dz = c1.z - c2.z;
+      const reconstructedDistance = Math.sqrt(dx*dx + dy*dy + dz*dz) * 100;
+      stressVal = Math.abs(reconstructedDistance - d.distance);
+      difference = reconstructedDistance - d.distance;
+      isStressed = topStressedIds.has(d.id);
+    }
+
+    // Glowing style (Red for stressed edges to draw focus)
+    ctx.shadowBlur = isStressed ? 10 : 6;
+    ctx.shadowColor = isStressed ? 'rgba(239, 68, 68, 0.75)' : 'rgba(124, 58, 237, 0.5)';
+    ctx.strokeStyle = isStressed ? 'rgba(239, 68, 68, 0.9)' : 'rgba(124, 58, 237, 0.65)';
+    ctx.lineWidth = isStressed ? 3.5 : 2.5;
 
     ctx.beginPath();
     ctx.moveTo(pt1.px, pt1.py);
@@ -544,17 +672,20 @@ function draw3DScene() {
     const midX = (pt1.px + pt2.px) / 2;
     const midY = (pt1.py + pt2.py) / 2;
     
-    const distText = `${d.distance.toLocaleString()} cm`;
+    let distText = `${d.distance.toLocaleString()} cm`;
+    if (isStressed) {
+      const diffSign = difference > 0 ? '+' : '';
+      distText += ` (Diff: ${diffSign}${difference.toFixed(1)} cm)`;
+    }
     
-    ctx.font = '500 9px "Inter", sans-serif';
-    ctx.fillStyle = '#a78bfa';
+    ctx.font = isStressed ? 'bold 9px "Inter", sans-serif' : '500 9px "Inter", sans-serif';
     
     // Pill backdrop for readability
     const textWidth = ctx.measureText(distText).width;
     ctx.fillStyle = 'rgba(16, 18, 27, 0.85)';
     ctx.fillRect(midX - textWidth / 2 - 4, midY - 6, textWidth + 8, 12);
     
-    ctx.fillStyle = '#a78bfa';
+    ctx.fillStyle = isStressed ? '#f87171' : '#a78bfa';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(distText, midX, midY);
@@ -708,6 +839,173 @@ window.addEventListener('resize', () => {
 // ==========================================================================
 
 /**
+ * Perform power iteration with Gram-Schmidt orthogonalization to solve for eigenvectors
+ */
+function getEigenvector(A, excludeV = null) {
+  const seeds = [
+    [1.0, 2.0, 3.0],
+    [-1.0, 1.0, -1.0],
+    [0.1, -0.9, 0.4]
+  ];
+  let bestV = [1.0, 0.0, 0.0];
+  let bestVal = -1.0;
+  
+  for (const seed of seeds) {
+    let v = [...seed];
+    if (excludeV) {
+      // Project seed to be orthogonal to excludeV
+      const dot = v[0] * excludeV[0] + v[1] * excludeV[1] + v[2] * excludeV[2];
+      v = [
+        v[0] - dot * excludeV[0],
+        v[1] - dot * excludeV[1],
+        v[2] - dot * excludeV[2]
+      ];
+    }
+    const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+    if (len < 1e-6) continue;
+    v = [v[0] / len, v[1] / len, v[2] / len];
+    
+    for (let iter = 0; iter < 100; iter++) {
+      let w = [
+        A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
+        A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
+        A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2]
+      ];
+      if (excludeV) {
+        // Maintain strict numerical orthogonality
+        const dot = w[0] * excludeV[0] + w[1] * excludeV[1] + w[2] * excludeV[2];
+        w = [
+          w[0] - dot * excludeV[0],
+          w[1] - dot * excludeV[1],
+          w[2] - dot * excludeV[2]
+        ];
+      }
+      const wLen = Math.sqrt(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
+      if (wLen < 1e-12) break;
+      const nextV = [w[0] / wLen, w[1] / wLen, w[2] / wLen];
+      const dotV = v[0] * nextV[0] + v[1] * nextV[1] + v[2] * nextV[2];
+      if (Math.abs(dotV) > 0.9999999) {
+        v = nextV;
+        break;
+      }
+      v = nextV;
+    }
+    
+    const Av = [
+      A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
+      A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
+      A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2]
+    ];
+    const eigenvalue = v[0] * Av[0] + v[1] * Av[1] + v[2] * Av[2];
+    if (eigenvalue > bestVal) {
+      bestVal = eigenvalue;
+      bestV = v;
+    }
+  }
+  return bestV;
+}
+
+/**
+ * Automatically orient camera yaw and pitch so that the point cloud lies flat
+ * on its 2D PCA plane of maximum spread, and set zoom to 1.0 to fit cleanly.
+ */
+function alignCameraToPCA() {
+  if (!solveSuccess || points.length < 4) return;
+
+  // 1. Gather solved 3D point coordinates
+  const coordsList = points.map(p => {
+    const coord = coordinates[p.id];
+    return {
+      x: coord ? coord.x : 0,
+      y: coord ? coord.y : 0,
+      z: coord ? coord.z : 0
+    };
+  }).filter(p => coordinates[p.id] !== undefined);
+
+  if (coordsList.length < 4) return;
+
+  // 2. Center coordinates around 3D centroid
+  const n = coordsList.length;
+  let meanX = 0, meanY = 0, meanZ = 0;
+  for (const p of coordsList) {
+    meanX += p.x;
+    meanY += p.y;
+    meanZ += p.z;
+  }
+  meanX /= n;
+  meanY /= n;
+  meanZ /= n;
+
+  const centered = coordsList.map(p => ({
+    x: p.x - meanX,
+    y: p.y - meanY,
+    z: p.z - meanZ
+  }));
+
+  // 3. Compute Covariance Matrix
+  let Cxx = 0, Cxy = 0, Cxz = 0;
+  let Cyy = 0, Cyz = 0, Czz = 0;
+  for (const p of centered) {
+    Cxx += p.x * p.x;
+    Cxy += p.x * p.y;
+    Cxz += p.x * p.z;
+    Cyy += p.y * p.y;
+    Cyz += p.y * p.z;
+    Czz += p.z * p.z;
+  }
+  Cxx /= n;
+  Cxy /= n;
+  Cxz /= n;
+  Cyy /= n;
+  Cyz /= n;
+  Czz /= n;
+
+  const Cov = [
+    [Cxx, Cxy, Cxz],
+    [Cxy, Cyy, Cyz],
+    [Cxz, Cyz, Czz]
+  ];
+
+  // 4. Solve for first two principal components
+  const v1 = getEigenvector(Cov);
+  const v2 = getEigenvector(Cov, v1);
+
+  // 5. Compute PC3 as the normal to the PCA plane
+  let v3 = [
+    v1[1]*v2[2] - v1[2]*v2[1],
+    v1[2]*v2[0] - v1[0]*v2[2],
+    v1[0]*v2[1] - v1[1]*v2[0]
+  ];
+  const len3 = Math.sqrt(v3[0]*v3[0] + v3[1]*v3[1] + v3[2]*v3[2]);
+  if (len3 > 1e-6) {
+    v3 = [v3[0]/len3, v3[1]/len3, v3[2]/len3];
+  }
+
+  // 6. Set camera look vector w = v3 or -v3 to look perpendicular to the PCA plane
+  let w = [...v3];
+  // Clamped Math.asin prevents tiny float-precision errors from causing NaN
+  let wY = Math.max(-1.0, Math.min(1.0, w[1]));
+  let newPitch = Math.asin(wY);
+  let newYaw = Math.atan2(w[0], w[2]);
+
+  // Choose the sign of w that ensures the horizontal axis has a positive dot product with PC1 (v1)
+  // This keeps the direction of maximum spread pointing neatly to the right
+  const u1 = [Math.cos(newYaw), 0, -Math.sin(newYaw)];
+  const dot = u1[0]*v1[0] + u1[1]*v1[1] + u1[2]*v1[2];
+  if (dot < 0) {
+    w = [-w[0], -w[1], -w[2]];
+    wY = Math.max(-1.0, Math.min(1.0, w[1]));
+    newPitch = Math.asin(wY);
+    newYaw = Math.atan2(w[0], w[2]);
+  }
+
+  // Update controls and reset zoom to neatly fit point cloud inside width/height
+  yaw = newYaw;
+  pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, newPitch));
+  zoom = 1.0;
+}
+
+/**
  * Perform 3D to 2D PCA projection and generate an ultra-minimal black-and-white SVG
  */
 function generateMinimalSVGString() {
@@ -768,71 +1066,6 @@ function generateMinimalSVGString() {
     [Cxy, Cyy, Cyz],
     [Cxz, Cyz, Czz]
   ];
-
-  // 4. Power Iteration with Orthogonalization to solve for PC1 and PC2
-  function getEigenvector(A, excludeV = null) {
-    const seeds = [
-      [1.0, 2.0, 3.0],
-      [-1.0, 1.0, -1.0],
-      [0.1, -0.9, 0.4]
-    ];
-    let bestV = [1.0, 0.0, 0.0];
-    let bestVal = -1.0;
-    
-    for (const seed of seeds) {
-      let v = [...seed];
-      if (excludeV) {
-        // Project seed to be orthogonal to excludeV
-        const dot = v[0] * excludeV[0] + v[1] * excludeV[1] + v[2] * excludeV[2];
-        v = [
-          v[0] - dot * excludeV[0],
-          v[1] - dot * excludeV[1],
-          v[2] - dot * excludeV[2]
-        ];
-      }
-      const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
-      if (len < 1e-6) continue;
-      v = [v[0] / len, v[1] / len, v[2] / len];
-      
-      for (let iter = 0; iter < 100; iter++) {
-        let w = [
-          A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
-          A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
-          A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2]
-        ];
-        if (excludeV) {
-          // Maintain strict numerical orthogonality
-          const dot = w[0] * excludeV[0] + w[1] * excludeV[1] + w[2] * excludeV[2];
-          w = [
-            w[0] - dot * excludeV[0],
-            w[1] - dot * excludeV[1],
-            w[2] - dot * excludeV[2]
-          ];
-        }
-        const wLen = Math.sqrt(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
-        if (wLen < 1e-12) break;
-        const nextV = [w[0] / wLen, w[1] / wLen, w[2] / wLen];
-        const dotV = v[0] * nextV[0] + v[1] * nextV[1] + v[2] * nextV[2];
-        if (Math.abs(dotV) > 0.9999999) {
-          v = nextV;
-          break;
-        }
-        v = nextV;
-      }
-      
-      const Av = [
-        A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
-        A[1][0] * v[0] + A[1][1] * v[1] + A[1][2] * v[2],
-        A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2]
-      ];
-      const eigenvalue = v[0] * Av[0] + v[1] * Av[1] + v[2] * Av[2];
-      if (eigenvalue > bestVal) {
-        bestVal = eigenvalue;
-        bestV = v;
-      }
-    }
-    return bestV;
-  }
 
   const v1 = getEigenvector(Cov);
   const v2 = getEigenvector(Cov, v1);
@@ -976,5 +1209,5 @@ downloadSvgBtn.addEventListener('click', downloadSVG);
 // ==========================================================================
 // Initial Boot Trigger
 // ==========================================================================
-fetchData();
+fetchData(false, true);
 // Periodically poll for changes (optional, but standard fetch on boot is robust)
