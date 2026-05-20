@@ -41,6 +41,7 @@ const canvasControls = document.getElementById('canvasControls');
 const placeholderStatus = document.getElementById('placeholderStatus');
 const solveBadge = document.getElementById('solveBadge');
 const downloadSvgBtn = document.getElementById('downloadSvgBtn');
+const resetViewBtn = document.getElementById('resetViewBtn');
 
 /**
  * Fetch latest state from Node server and update views
@@ -49,12 +50,14 @@ async function fetchData(selectFirstSuggestion = false, alignCameraToPCAFlag = f
   try {
     const response = await fetch('/api/data');
     if (!response.ok) throw new Error('Failed to fetch data');
-    
     const data = await response.json();
     points = data.points;
     distances = data.distances;
     coordinates = data.coordinates;
     solveSuccess = data.solveSuccess;
+    
+    // Align coordinates permanently to PCA space client-side
+    alignCoordinatesToPCA();
     
     if (alignCameraToPCAFlag && solveSuccess) {
       alignCameraToPCA();
@@ -531,6 +534,7 @@ function updateCanvasDisplay() {
     canvasPlaceholder.classList.add('hidden');
     canvasControls.classList.remove('hidden');
     downloadSvgBtn.classList.remove('hidden');
+    resetViewBtn.classList.remove('hidden');
     
     solveBadge.className = 'badge solved';
     solveBadge.textContent = '3D Reconstructed';
@@ -542,6 +546,7 @@ function updateCanvasDisplay() {
     canvasPlaceholder.classList.remove('hidden');
     canvasControls.classList.add('hidden');
     downloadSvgBtn.classList.add('hidden');
+    resetViewBtn.classList.add('hidden');
     
     solveBadge.className = 'badge unsolved';
     solveBadge.textContent = 'Awaiting Data';
@@ -906,16 +911,18 @@ function getEigenvector(A, excludeV = null) {
 }
 
 /**
- * Automatically orient camera yaw and pitch so that the point cloud lies flat
- * on its 2D PCA plane of maximum spread, and set zoom to 1.0 to fit cleanly.
+ * Perform client-side PCA alignment to center and orient point cloud coordinates.
+ * Aligns PC1 to the horizontal world X axis, PC2 to the vertical Y axis, and PC3
+ * to the depth Z axis using power iteration and a stable sign alignment convention.
  */
-function alignCameraToPCA() {
+function alignCoordinatesToPCA() {
   if (!solveSuccess || points.length < 4) return;
 
-  // 1. Gather solved 3D point coordinates
+  // 1. Gather active solved 3D point coordinates
   const coordsList = points.map(p => {
     const coord = coordinates[p.id];
     return {
+      id: p.id,
       x: coord ? coord.x : 0,
       y: coord ? coord.y : 0,
       z: coord ? coord.z : 0
@@ -937,6 +944,7 @@ function alignCameraToPCA() {
   meanZ /= n;
 
   const centered = coordsList.map(p => ({
+    id: p.id,
     x: p.x - meanX,
     y: p.y - meanY,
     z: p.z - meanZ
@@ -953,12 +961,8 @@ function alignCameraToPCA() {
     Cyz += p.y * p.z;
     Czz += p.z * p.z;
   }
-  Cxx /= n;
-  Cxy /= n;
-  Cxz /= n;
-  Cyy /= n;
-  Cyz /= n;
-  Czz /= n;
+  Cxx /= n; Cxy /= n; Cxz /= n;
+  Cyy /= n; Cyz /= n; Czz /= n;
 
   const Cov = [
     [Cxx, Cxy, Cxz],
@@ -967,10 +971,32 @@ function alignCameraToPCA() {
   ];
 
   // 4. Solve for first two principal components
-  const v1 = getEigenvector(Cov);
-  const v2 = getEigenvector(Cov, v1);
+  let v1 = getEigenvector(Cov);
+  let v2 = getEigenvector(Cov, v1);
 
-  // 5. Compute PC3 as the normal to the PCA plane
+  // 5. Apply stable sign alignment based on furthest point from centroid
+  let maxDistSq = -1;
+  let furthestPt = null;
+  for (const p of centered) {
+    const distSq = p.x * p.x + p.y * p.y + p.z * p.z;
+    if (distSq > maxDistSq) {
+      maxDistSq = distSq;
+      furthestPt = p;
+    }
+  }
+
+  if (furthestPt) {
+    const dot1 = furthestPt.x * v1[0] + furthestPt.y * v1[1] + furthestPt.z * v1[2];
+    if (dot1 < 0) {
+      v1 = [-v1[0], -v1[1], -v1[2]];
+    }
+    const dot2 = furthestPt.x * v2[0] + furthestPt.y * v2[1] + furthestPt.z * v2[2];
+    if (dot2 < 0) {
+      v2 = [-v2[0], -v2[1], -v2[2]];
+    }
+  }
+
+  // 6. Compute PC3 normal (maintains strict right-handed coordinate frame)
   let v3 = [
     v1[1]*v2[2] - v1[2]*v2[1],
     v1[2]*v2[0] - v1[0]*v2[2],
@@ -981,28 +1007,26 @@ function alignCameraToPCA() {
     v3 = [v3[0]/len3, v3[1]/len3, v3[2]/len3];
   }
 
-  // 6. Set camera look vector w = v3 or -v3 to look perpendicular to the PCA plane
-  let w = [...v3];
-  // Clamped Math.asin prevents tiny float-precision errors from causing NaN
-  let wY = Math.max(-1.0, Math.min(1.0, w[1]));
-  let newPitch = Math.asin(wY);
-  let newYaw = Math.atan2(w[0], w[2]);
+  // 7. Rotate global coordinates permanently in PCA space
+  centered.forEach(p => {
+    coordinates[p.id] = {
+      x: p.x * v1[0] + p.y * v1[1] + p.z * v1[2],
+      y: p.x * v2[0] + p.y * v2[1] + p.z * v2[2],
+      z: p.x * v3[0] + p.y * v3[1] + p.z * v3[2]
+    };
+  });
+}
 
-  // Choose the sign of w that ensures the horizontal axis has a positive dot product with PC1 (v1)
-  // This keeps the direction of maximum spread pointing neatly to the right
-  const u1 = [Math.cos(newYaw), 0, -Math.sin(newYaw)];
-  const dot = u1[0]*v1[0] + u1[1]*v1[1] + u1[2]*v1[2];
-  if (dot < 0) {
-    w = [-w[0], -w[1], -w[2]];
-    wY = Math.max(-1.0, Math.min(1.0, w[1]));
-    newPitch = Math.asin(wY);
-    newYaw = Math.atan2(w[0], w[2]);
-  }
-
-  // Update controls and reset zoom to neatly fit point cloud inside width/height
-  yaw = newYaw;
-  pitch = Math.max(-Math.PI / 2.1, Math.min(Math.PI / 2.1, newPitch));
+/**
+ * Automatically orient camera yaw and pitch so that the PCA-aligned point cloud
+ * is seen flat and perfectly scaled to fit the viewer.
+ */
+function alignCameraToPCA() {
+  if (!solveSuccess || points.length < 4) return;
+  yaw = 0;
+  pitch = 0;
   zoom = 1.0;
+  requestAnimationFrame(draw3DScene);
 }
 
 /**
@@ -1205,6 +1229,7 @@ function downloadSVG() {
 
 // Bind download button click event
 downloadSvgBtn.addEventListener('click', downloadSVG);
+resetViewBtn.addEventListener('click', alignCameraToPCA);
 
 // ==========================================================================
 // Initial Boot Trigger
