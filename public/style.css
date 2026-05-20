@@ -509,29 +509,55 @@ select {
   display: inline-block;
 }
 
-/* Controls annotation floating label */
-.canvas-controls-info {
+/* Unified Canvas Bottom Control Dock */
+.canvas-footer {
   position: absolute;
   bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(16, 18, 27, 0.8);
+  background: rgba(16, 18, 27, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
   padding: 6px 14px;
-  border-radius: 20px;
+  border-radius: 24px;
   font-size: 0.7rem;
   font-weight: 500;
-  color: var(--text-secondary);
-  pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
   transition: var(--transition-smooth);
+  z-index: 10;
 }
 
-.canvas-controls-info.hidden {
+.canvas-footer.hidden {
   opacity: 0;
   transform: translate(-50%, 10px);
+  pointer-events: none;
+}
+
+.canvas-instructions {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.canvas-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding-left: 10px;
+}
+
+/* Extra small buttons for the dock */
+.btn-xs {
+  padding: 3px 8px !important;
+  font-size: 0.65rem !important;
+  gap: 3px !important;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 12px !important;
 }
 
 /* Data Tables */

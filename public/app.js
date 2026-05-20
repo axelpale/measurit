@@ -2,6 +2,8 @@
 let points = [];
 let distances = [];
 let coordinates = {};
+let rawCoordinates = {};
+let flipView = false;
 let solveSuccess = false;
 
 // 3D Camera Orbit controls state
@@ -37,11 +39,12 @@ const distanceSuggestionsList = document.getElementById('distanceSuggestionsList
 const mapCanvas = document.getElementById('mapCanvas');
 const ctx = mapCanvas.getContext('2d');
 const canvasPlaceholder = document.getElementById('canvasPlaceholder');
-const canvasControls = document.getElementById('canvasControls');
+const canvasFooter = document.getElementById('canvasFooter');
 const placeholderStatus = document.getElementById('placeholderStatus');
 const solveBadge = document.getElementById('solveBadge');
 const downloadSvgBtn = document.getElementById('downloadSvgBtn');
 const resetViewBtn = document.getElementById('resetViewBtn');
+const flipViewBtn = document.getElementById('flipViewBtn');
 
 /**
  * Fetch latest state from Node server and update views
@@ -54,6 +57,7 @@ async function fetchData(selectFirstSuggestion = false, alignCameraToPCAFlag = f
     points = data.points;
     distances = data.distances;
     coordinates = data.coordinates;
+    rawCoordinates = JSON.parse(JSON.stringify(data.coordinates || {}));
     solveSuccess = data.solveSuccess;
     
     // Align coordinates permanently to PCA space client-side
@@ -532,9 +536,10 @@ function updateCanvasDisplay() {
   if (solveSuccess && points.length >= 4) {
     // Unlock the Canvas Orbit rendering
     canvasPlaceholder.classList.add('hidden');
-    canvasControls.classList.remove('hidden');
+    canvasFooter.classList.remove('hidden');
     downloadSvgBtn.classList.remove('hidden');
     resetViewBtn.classList.remove('hidden');
+    flipViewBtn.classList.remove('hidden');
     
     solveBadge.className = 'badge solved';
     solveBadge.textContent = '3D Reconstructed';
@@ -544,9 +549,10 @@ function updateCanvasDisplay() {
   } else {
     // Lock viewport and show overlay placeholder
     canvasPlaceholder.classList.remove('hidden');
-    canvasControls.classList.add('hidden');
+    canvasFooter.classList.add('hidden');
     downloadSvgBtn.classList.add('hidden');
     resetViewBtn.classList.add('hidden');
+    flipViewBtn.classList.add('hidden');
     
     solveBadge.className = 'badge unsolved';
     solveBadge.textContent = 'Awaiting Data';
@@ -918,6 +924,9 @@ function getEigenvector(A, excludeV = null) {
 function alignCoordinatesToPCA() {
   if (!solveSuccess || points.length < 4) return;
 
+  // Reset coordinates to raw baseline before applying PCA rotation
+  coordinates = JSON.parse(JSON.stringify(rawCoordinates || {}));
+
   // 1. Gather active solved 3D point coordinates
   const coordsList = points.map(p => {
     const coord = coordinates[p.id];
@@ -996,6 +1005,11 @@ function alignCoordinatesToPCA() {
     }
   }
 
+  // Apply user flipped view preference
+  if (flipView) {
+    v1 = [-v1[0], -v1[1], -v1[2]];
+  }
+
   // 6. Compute PC3 normal (maintains strict right-handed coordinate frame)
   let v3 = [
     v1[1]*v2[2] - v1[2]*v2[1],
@@ -1033,81 +1047,27 @@ function alignCameraToPCA() {
  * Perform 3D to 2D PCA projection and generate an ultra-minimal black-and-white SVG
  */
 function generateMinimalSVGString() {
-  // 1. Filter and center coordinates
+  // 1. Gather coordinates directly from the aligned global coordinates object
   const coordsList = points.map(p => {
     const coord = coordinates[p.id];
     return {
       id: p.id,
       label: p.label,
-      x: coord ? coord.x : 0,
-      y: coord ? coord.y : 0,
-      z: coord ? coord.z : 0
+      px: coord ? coord.x : 0,
+      py: coord ? coord.y : 0
     };
   }).filter(p => coordinates[p.id] !== undefined);
 
   if (coordsList.length < 4) return null;
 
-  // 2. Center coordinates around 3D centroid
-  const n = coordsList.length;
-  let meanX = 0, meanY = 0, meanZ = 0;
-  for (const p of coordsList) {
-    meanX += p.x;
-    meanY += p.y;
-    meanZ += p.z;
-  }
-  meanX /= n;
-  meanY /= n;
-  meanZ /= n;
-
-  const centered = coordsList.map(p => ({
-    id: p.id,
-    label: p.label,
-    x: p.x - meanX,
-    y: p.y - meanY,
-    z: p.z - meanZ
-  }));
-
-  // 3. Compute 3x3 Covariance Matrix
-  let Cxx = 0, Cxy = 0, Cxz = 0;
-  let Cyy = 0, Cyz = 0, Czz = 0;
-  for (const p of centered) {
-    Cxx += p.x * p.x;
-    Cxy += p.x * p.y;
-    Cxz += p.x * p.z;
-    Cyy += p.y * p.y;
-    Cyz += p.y * p.z;
-    Czz += p.z * p.z;
-  }
-  Cxx /= n;
-  Cxy /= n;
-  Cxz /= n;
-  Cyy /= n;
-  Cyz /= n;
-  Czz /= n;
-
-  const Cov = [
-    [Cxx, Cxy, Cxz],
-    [Cxy, Cyy, Cyz],
-    [Cxz, Cyz, Czz]
-  ];
-
-  const v1 = getEigenvector(Cov);
-  const v2 = getEigenvector(Cov, v1);
-
-  // 5. Project centered coordinates onto 2D plane
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
 
-  const projectedPoints = centered.map(p => {
-    const px = p.x * v1[0] + p.y * v1[1] + p.z * v1[2];
-    const py = p.x * v2[0] + p.y * v2[1] + p.z * v2[2];
-    
-    if (px < minX) minX = px;
-    if (px > maxX) maxX = px;
-    if (py < minY) minY = py;
-    if (py > maxY) maxY = py;
-    
-    return { id: p.id, label: p.label, px, py };
+  coordsList.forEach(p => {
+    if (p.px < minX) minX = p.px;
+    if (p.px > maxX) maxX = p.px;
+    if (p.py < minY) minY = p.py;
+    if (p.py > maxY) maxY = p.py;
   });
 
   const svgW = 600;
@@ -1124,13 +1084,13 @@ function generateMinimalSVGString() {
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
 
-  projectedPoints.forEach(p => {
+  coordsList.forEach(p => {
     p.svgX = svgW / 2 + (p.px - cx) * finalScale;
     p.svgY = svgH / 2 - (p.py - cy) * finalScale; // Invert Cartesian Y for SVG screens
   });
 
   const projMap = {};
-  projectedPoints.forEach(p => {
+  coordsList.forEach(p => {
     projMap[p.id] = p;
   });
 
@@ -1181,7 +1141,7 @@ function generateMinimalSVGString() {
   <!-- Point Landmark Dots (Simple solid black dots) -->
   <g id="points">`;
 
-  projectedPoints.forEach(pt => {
+  coordsList.forEach(pt => {
     svg += `
     <circle cx="${pt.svgX.toFixed(2)}" cy="${pt.svgY.toFixed(2)}" r="6" fill="#000000"/>`;
   });
@@ -1192,7 +1152,7 @@ function generateMinimalSVGString() {
   <!-- Point Landmark Labels (Simple black text centered slightly above) -->
   <g id="point-labels">`;
 
-  projectedPoints.forEach(pt => {
+  coordsList.forEach(pt => {
     svg += `
     <text x="${pt.svgX.toFixed(2)}" y="${(pt.svgY - 12).toFixed(2)}" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="bold" fill="#000000" text-anchor="middle">${escapeHTML(pt.label)}</text>`;
   });
@@ -1230,6 +1190,12 @@ function downloadSVG() {
 // Bind download button click event
 downloadSvgBtn.addEventListener('click', downloadSVG);
 resetViewBtn.addEventListener('click', alignCameraToPCA);
+flipViewBtn.addEventListener('click', () => {
+  if (!solveSuccess) return;
+  flipView = !flipView;
+  alignCoordinatesToPCA();
+  requestAnimationFrame(draw3DScene);
+});
 
 // ==========================================================================
 // Initial Boot Trigger
