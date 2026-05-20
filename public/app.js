@@ -286,10 +286,10 @@ function updateDistanceSuggestions(selectFirst = false) {
     return;
   }
   
-  // Sort suggestions: Remeasures first, then missing pairs sorted by ID difference
+  // Sort suggestions: Missing pairs (preferred) first sorted by ID difference, then Remeasures at the bottom
   suggestions.sort((a, b) => {
-    if (a.isRemeasure && !b.isRemeasure) return -1;
-    if (!a.isRemeasure && b.isRemeasure) return 1;
+    if (a.isRemeasure && !b.isRemeasure) return 1;
+    if (!a.isRemeasure && b.isRemeasure) return -1;
     if (a.isRemeasure && b.isRemeasure) return 0;
     return a.diff - b.diff;
   });
